@@ -1,0 +1,29 @@
+{
+    "keyboard_name": "AnyKey",
+    "manufacturer": "AnyKey",
+    "maintainer": "jblouse",
+    "bootloader": "rp2040",
+    "diode_direction": "COL2ROW",
+    "features": {
+        "bootmagic": false,
+        "extrakey": true,
+        "mousekey": false,
+        "nkro": false
+    },
+    "processor": "RP2040",
+    "usb": {
+        "device_version": "0.0.1",
+        "pid": "0x414B",
+        "vid": "0xFEED"
+    },
+    "layouts": {
+        "LAYOUT": {
+            "layout": [
+                {"label": "A", "matrix": [4, 4], "x": 0, "y": 0},
+                {"label": "B", "matrix": [5, 5], "x": 1, "y": 0},
+                {"label": "C", "matrix": [6, 6], "x": 2, "y": 0},
+                {"label": "D", "matrix": [7, 7], "x": 3, "y": 0}
+            ]
+        }
+    }
+}
