@@ -50,42 +50,68 @@ static void fifo_drain(void) {
     }
 }
 
-static void fifo_push_blocking(uint32_t data) {
+#define CORE1_LAUNCH_TIMEOUT_US 1000000
+
+/* Returns false on timeout. A stuck/failed core 1 launch must never be able
+ * to block matrix_init() (and therefore QMK's entire main loop, including
+ * Vial's raw HID processing) forever - see docs/hardware-notes.md. */
+static bool fifo_push_blocking(uint32_t data) {
+    uint64_t deadline = time_us_64() + CORE1_LAUNCH_TIMEOUT_US;
     while (!(sio_hw->fifo_st & SIO_FIFO_ST_RDY_BITS)) {
+        if (time_us_64() > deadline) return false;
     }
     sio_hw->fifo_wr = data;
     __asm volatile("sev");
+    return true;
 }
 
-static uint32_t fifo_pop_blocking(void) {
+static bool fifo_pop_blocking(uint32_t *out) {
+    uint64_t deadline = time_us_64() + CORE1_LAUNCH_TIMEOUT_US;
     while (!(sio_hw->fifo_st & SIO_FIFO_ST_VLD_BITS)) {
         __asm volatile("wfe");
+        if (time_us_64() > deadline) return false;
     }
-    return sio_hw->fifo_rd;
+    *out = sio_hw->fifo_rd;
+    return true;
 }
 
-static void core1_launch(void (*entry)(void), uint32_t *sp) {
+static bool core1_launch(void (*entry)(void), uint32_t *sp) {
     core1_reset();
 
     const uint32_t cmd_sequence[] = {0, 0, 1, scb_hw->vtor, (uintptr_t)sp, (uintptr_t)entry};
 
+    /* Per-step timeouts in fifo_push/pop_blocking only catch the FIFO going
+     * silent. If core 1 responds but with mismatched values, seq resets to 0
+     * and the handshake retries indefinitely - each retry individually
+     * "succeeds" its own short timeout, so nothing above ever trips. This
+     * overall deadline bounds the whole attempt regardless. */
+    uint64_t overall_deadline = time_us_64() + CORE1_LAUNCH_TIMEOUT_US;
+
     uint32_t seq = 0;
     do {
+        if (time_us_64() > overall_deadline) return false;
+
         uint32_t cmd = cmd_sequence[seq];
         if (!cmd) {
             fifo_drain();
             __asm volatile("sev");
         }
-        fifo_push_blocking(cmd);
-        uint32_t response = fifo_pop_blocking();
-        seq               = (cmd == response) ? seq + 1 : 0;
+        if (!fifo_push_blocking(cmd)) return false;
+        uint32_t response;
+        if (!fifo_pop_blocking(&response)) return false;
+        seq = (cmd == response) ? seq + 1 : 0;
     } while (seq < (sizeof(cmd_sequence) / sizeof(cmd_sequence[0])));
+    return true;
 }
 
-#define CORE1_STACK_WORDS 1024
-static uint32_t core1_stack[CORE1_STACK_WORDS];
+#define CORE1_STACK_WORDS 2048
+static uint32_t core1_stack[CORE1_STACK_WORDS] __attribute__((aligned(8)));
 
 static void core1_entry(void) {
+    /* TEMPORARY bisection: run PIO-USB/TinyUSB init (claims PIO state
+     * machines + DMA channels) but skip the ongoing tuh_task() polling loop,
+     * to isolate init-time corruption from something needing the task loop
+     * to actually run. See docs/hardware-notes.md. */
     pio_usb_configuration_t pio_cfg = PIO_USB_DEFAULT_CONFIG;
     pio_cfg.pin_dp                  = ANYKEY_HOST_DP_PIN;
 
@@ -97,9 +123,15 @@ static void core1_entry(void) {
     };
     tusb_init(1, &host_init);
 
+#if 0
     while (1) {
         tuh_task();
     }
+#else
+    while (1) {
+        __asm volatile("wfe");
+    }
+#endif
 }
 
 /* CFG_TUSB_OS is OPT_OS_NONE (no RTOS) - TinyUSB requires the application to
@@ -119,12 +151,14 @@ void __unhandled_user_irq(void) {
     }
 }
 
+volatile bool anykey_host_core1_launched = false;
+
 void anykey_usb_host_init(void) {
     gpio_init(ANYKEY_HOST_PWR_PIN);
     gpio_set_dir(ANYKEY_HOST_PWR_PIN, true);
     gpio_put(ANYKEY_HOST_PWR_PIN, true);
 
-    core1_launch(core1_entry, core1_stack + CORE1_STACK_WORDS);
+    anykey_host_core1_launched = core1_launch(core1_entry, core1_stack + CORE1_STACK_WORDS);
 }
 
 /* ---- TinyUSB host HID callbacks (run on core 1) ---- */
