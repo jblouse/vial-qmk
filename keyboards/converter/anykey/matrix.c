@@ -20,7 +20,8 @@
 #include "host.h"
 #include "keyboard.h"
 #include "timer.h"
-#include "send_string.h"
+#include "print.h"
+#include "debug.h"
 
 #include "usbh.h"
 
@@ -44,11 +45,10 @@ bool matrix_has_ghost(void) {
 }
 
 void matrix_init(void) {
-    /* TEMPORARY bisection: host role (core 1 / PIO-USB / TinyUSB) disabled
-     * entirely to determine whether it's interfering with core 0, given
-     * RP2040 has no memory protection between cores. See
-     * docs/hardware-notes.md. */
+    debug_enable = true; /* TEMPORARY Milestone 1 bring-up - see docs/hardware-notes.md */
+    print("anykey: matrix_init start\n");
     anykey_usb_host_init();
+    print("anykey: matrix_init done\n");
     matrix_init_kb();
 }
 
@@ -63,24 +63,36 @@ __attribute__((weak)) void matrix_scan_kb(void) {
 __attribute__((weak)) void matrix_scan_user(void) {
 }
 
-/* TEMPORARY Milestone 1 bring-up diagnostic: types a status string every ~5s
- * so core 1's launch outcome is directly observable without a debug console
- * (build_vial.mk forces NO_DEBUG), no precise timing needed on the tester's
- * end. Remove once the host role is confirmed working end to end - see
- * docs/hardware-notes.md. */
-static void anykey_announce_core1_status(void) {
-    static uint32_t last_announce_ms = 0;
-    uint32_t        now              = timer_read32();
-    if (now - last_announce_ms > 5000) {
-        last_announce_ms = now;
-        send_string(anykey_host_core1_launched ? "ANYKEY_CORE1_OK " : "ANYKEY_CORE1_TIMEOUT ");
+/* TEMPORARY Milestone 1 bring-up diagnostic: dprintf()/xprintf() produced no
+ * console output at all (confirmed with two different format strings),
+ * while plain print() worked reliably - avoiding xprintf entirely with a
+ * tiny hand-rolled decimal formatter instead. See docs/hardware-notes.md. */
+static void anykey_print_u8(uint8_t v) {
+    char buf[4];
+    buf[0] = '0' + (v / 100);
+    buf[1] = '0' + ((v / 10) % 10);
+    buf[2] = '0' + (v % 10);
+    buf[3] = '\0';
+    print(buf);
+}
+
+static void anykey_log_host_status(void) {
+    static uint32_t last_log_ms = 0;
+    uint32_t        now         = timer_read32();
+    if (now - last_log_ms > 2000) {
+        last_log_ms = now;
+        print("m");
+        anykey_print_u8((uint8_t)anykey_host_mount_count);
+        print(" h");
+        anykey_print_u8((uint8_t)anykey_host_hid_mount_count);
+        print("\n");
     }
 }
 
 uint8_t matrix_scan(void) {
     bool changed = false;
 
-    anykey_announce_core1_status();
+    anykey_log_host_status();
 
     if (anykey_host_report_changed) {
         anykey_host_report_changed = false;

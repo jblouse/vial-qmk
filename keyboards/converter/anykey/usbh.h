@@ -2,6 +2,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stdint.h>
 #include "report.h"
 
 /* Populated on core 1 (TinyUSB host callbacks), read on core 0 (matrix.c).
@@ -16,6 +17,11 @@ extern volatile bool              anykey_host_report_changed;
  * never block the rest of the device (matrix_init, and therefore QMK's main
  * loop and Vial's raw HID processing) from proceeding regardless. */
 extern volatile bool anykey_host_core1_launched;
+
+/* TEMPORARY Milestone 1 bring-up diagnostic counters - see matrix.c and
+ * docs/hardware-notes.md. Incremented from core 1's TinyUSB host callbacks. */
+extern volatile uint32_t anykey_host_mount_count;
+extern volatile uint32_t anykey_host_hid_mount_count;
 
 /* Powers the host port, launches core 1, and starts the PIO-USB + TinyUSB
  * host stack there. Call once from matrix_init(). */

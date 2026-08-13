@@ -10,3 +10,8 @@ RAW_ENABLE = yes
 COMBO_ENABLE = no
 TAP_DANCE_ENABLE = no
 KEY_OVERRIDE_ENABLE = no
+
+# TEMPORARY Milestone 1 bring-up: real debug console via `qmk console`,
+# instead of one-bit send_string() diagnostics. See docs/hardware-notes.md.
+VIAL_KEEP_DEBUG_CONSOLE = yes
+CONSOLE_ENABLE = yes
